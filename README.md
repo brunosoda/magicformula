@@ -1,6 +1,6 @@
 # Magic Formula NYSE Stock Screener
 
-A Python implementation of Joel Greenblatt's Magic Formula investing strategy for NYSE-listed stocks. This tool automatically screens and ranks stocks based on earnings yield (EY) and return on capital (ROC) metrics.
+A Python implementation of Joel Greenblatt's Magic Formula investing strategy for NYSE/NASDAQ-listed stocks. It screens and ranks stocks based on earnings yield (EY) and return on capital (ROC), and ships a Streamlit dashboard to explore the results.
 
 ## 📋 Overview
 
@@ -8,85 +8,79 @@ The Magic Formula is a quantitative investment strategy developed by Joel Greenb
 - **Earnings Yield (EY)**: EBIT / Enterprise Value - measures how cheap a stock is
 - **Return on Capital (ROC)**: EBIT / (Net Working Capital + Net Fixed Assets) - measures how efficiently a company uses its capital
 
-This project consists of two main scripts:
-1. **Data Collection**: Fetches fundamental data for NYSE stocks and calculates Magic Formula metrics
-2. **Ranking**: Ranks stocks based on the combined EY and ROC scores
+The project has three parts:
+1. **Data collection** (`collect_data.py`) - fetches fundamental data for NYSE/NASDAQ stocks
+2. **Ranking** (`rank_stocks.py`) - ranks stocks by combined EY + ROC score
+3. **Dashboard** (`app.py`) - a Streamlit app to browse, filter, and chart the ranked results
 
-## 🚀 Features
-
-- Automatically fetches NYSE stock tickers from NASDAQ FTP servers
-- Filters for common stocks (excludes ETFs, preferred stocks, warrants, etc.)
-- Calculates EBIT, Enterprise Value, Earnings Yield, and Return on Capital
-- Ranks stocks using the Magic Formula methodology
-- Exports results to CSV files with date stamps
-- Configurable ticker limits and rate limiting to avoid API throttling
-
-## 📦 Requirements
-
-Install the required dependencies:
-
-```bash
-pip install pandas yfinance yahoo-fin
-```
-
-### Dependencies
-- `pandas` - Data manipulation and CSV handling
-- `yfinance` - Yahoo Finance API for stock data
-- `yahoo-fin` - Additional Yahoo Finance utilities
+Shared logic lives in the `magicformula/` package so all three entry points stay in sync.
 
 ## 📁 Project Structure
 
 ```
-magic_formula/
-├── apps/
-│   ├── magic_formula_nyse.py          # Main data collection script
-│   ├── ranking_nyse.py                 # Ranking and scoring script
-│   ├── magic_formula_nyse_*.csv        # Generated data files (date-stamped)
-│   └── ranking_magic_formula_nyse.csv  # Final ranked results
+magicformula/
+├── magicformula/            # Core library
+│   ├── tickers.py           # Fetch & filter the NYSE/NASDAQ ticker universe
+│   ├── fundamentals.py      # Pull EBIT/EV/EY/ROC per ticker via yfinance
+│   ├── ranking.py           # Compute the Magic Formula ranking
+│   └── io_utils.py          # Shared, relative file-path helpers
+├── collect_data.py          # CLI: fetch fundamentals -> magic_formula_nyse_DDMMYYYY.csv
+├── rank_stocks.py           # CLI: rank a fundamentals CSV -> ranking_magic_formula_nyse.csv
+├── app.py                   # Streamlit dashboard
+├── requirements.txt
 └── README.md
 ```
 
+## 📦 Requirements
+
+```bash
+pip install -r requirements.txt
+```
+
+- `pandas` - data manipulation and CSV handling
+- `yfinance` - Yahoo Finance API for stock fundamentals
+- `yahoo-fin` - additional Yahoo Finance utilities
+- `streamlit` - the interactive dashboard
+- `plotly` - charts inside the dashboard
+
 ## 🔧 Usage
 
-### Step 1: Collect Stock Data
-
-Run the main script to fetch and calculate Magic Formula metrics:
+### Step 1: Collect stock data
 
 ```bash
-python magic_formula_nyse.py
+python collect_data.py                      # all tickers
+python collect_data.py --max-tickers 200     # limit for a quick run
+python collect_data.py --sleep 1.0           # slower, gentler on rate limits
 ```
 
-This script will:
-- Fetch NYSE tickers from NASDAQ FTP servers
-- Filter for common stocks only
-- Retrieve fundamental data (EBIT, market cap, debt, cash, etc.)
-- Calculate EY and ROC for each stock
-- Save results to `magic_formula_nyse_DDMMYYYY.csv`
+Fetches NYSE/NASDAQ tickers, filters for common stocks, retrieves fundamentals, and saves `magic_formula_nyse_DDMMYYYY.csv` in the project root.
 
-**Configuration Options** (in `magic_formula_nyse.py`):
-- `MAX_TICKERS`: Limit the number of tickers to process (set to `None` for all)
-- `SLEEP_SECONDS`: Delay between API calls to avoid rate limiting (default: 0.5)
-
-### Step 2: Rank Stocks
-
-After collecting data, run the ranking script:
+### Step 2: Rank stocks
 
 ```bash
-python ranking_nyse.py
+python rank_stocks.py                        # ranks the most recently collected CSV
+python rank_stocks.py --input path/to/file.csv
 ```
 
-**Note**: Update the CSV path in `ranking_nyse.py` to match your generated file.
+Adds `rank_EY`, `rank_ROC`, `score` (lower is better) and `out_in` (excludes negative EBIT/EV, per Greenblatt's criteria), then saves `ranking_magic_formula_nyse.csv`.
 
-This script will:
-- Read the collected data
-- Rank stocks by EY and ROC separately
-- Calculate a combined score (lower is better)
-- Filter out stocks with negative EBIT or EV
-- Save ranked results to `ranking_magic_formula_nyse.csv`
+### Step 3: Explore the results in Streamlit
 
-## 📊 Output Format
+```bash
+streamlit run app.py
+```
 
-### Data Collection Output (`magic_formula_nyse_*.csv`)
+Opens a dashboard with:
+- **KPIs**: stocks screened, stocks passing the filter, top pick, data freshness
+- **Ranking table**: sortable/filterable, with percent/compact-number formatting and a CSV download
+- **Charts**: top-N stocks by score, and an Earnings Yield vs. Return on Capital scatter, both colored by score
+- **Sidebar filters**: valid-stocks-only toggle, top-N slider, ticker search
+
+If `ranking_magic_formula_nyse.csv` doesn't exist yet, the app will rank the most recent raw data file on the fly.
+
+## 📊 Data Columns
+
+### Raw fundamentals (`magic_formula_nyse_*.csv`)
 
 | Column | Description |
 |--------|-------------|
@@ -96,97 +90,31 @@ This script will:
 | EY | Earnings Yield (EBIT / EV) |
 | ROC | Return on Capital (EBIT / (NWC + Net PPE)) |
 
-### Ranking Output (`ranking_magic_formula_nyse.csv`)
+### Ranking (`ranking_magic_formula_nyse.csv`)
 
-Includes all columns from data collection plus:
-- `rank_EY`: Rank by Earnings Yield (1 = highest)
-- `rank_ROC`: Rank by Return on Capital (1 = highest)
-- `score`: Combined rank (rank_EY + rank_ROC, lower is better)
-- `out_in`: Filter status ("in" = valid, "out" = negative EBIT/EV)
+Includes all columns above plus:
+- `rank_EY`: rank by Earnings Yield (1 = highest)
+- `rank_ROC`: rank by Return on Capital (1 = highest)
+- `score`: combined rank (`rank_EY + rank_ROC`, lower is better)
+- `out_in`: filter status (`in` = valid, `out` = negative EBIT/EV)
 
 ## 🎯 How the Magic Formula Works
 
-1. **Earnings Yield (EY)**: Measures how cheap a stock is relative to its earnings
-   - Higher EY = cheaper stock
-   - Formula: EBIT / Enterprise Value
-
-2. **Return on Capital (ROC)**: Measures how efficiently a company uses its capital
-   - Higher ROC = more efficient
-   - Formula: EBIT / (Net Working Capital + Net Fixed Assets)
-
-3. **Ranking**: Stocks are ranked separately by EY and ROC, then combined
-   - Best stocks have low combined rank scores
-   - Stocks with negative EBIT or EV are filtered out
-
-## ⚙️ Configuration
-
-### Adjusting Ticker Limits
-
-In `magic_formula_nyse.py`:
-```python
-MAX_TICKERS = None  # Process all tickers
-# or
-MAX_TICKERS = 200   # Process first 200 tickers
-```
-
-### Rate Limiting
-
-Adjust the delay between API calls:
-```python
-SLEEP_SECONDS = 0.5  # 0.5 seconds between requests
-```
-
-### Updating CSV Paths
-
-In `ranking_nyse.py`, update the file paths:
-```python
-csv_path = "path/to/your/magic_formula_nyse_*.csv"
-output_path = "path/to/your/ranking_magic_formula_nyse.csv"
-```
+1. **Earnings Yield (EY)** - how cheap a stock is relative to its earnings. Higher EY = cheaper. `EBIT / Enterprise Value`
+2. **Return on Capital (ROC)** - how efficiently a company uses its capital. Higher ROC = more efficient. `EBIT / (Net Working Capital + Net Fixed Assets)`
+3. **Ranking** - stocks are ranked separately by EY and ROC, then combined; the best stocks have the lowest combined score. Stocks with negative EBIT or EV are filtered out.
 
 ## ⚠️ Important Notes
 
-- **API Rate Limits**: Yahoo Finance may throttle requests. Adjust `SLEEP_SECONDS` if you encounter rate limiting errors.
-- **Data Availability**: Not all stocks will have complete fundamental data. The script skips stocks with insufficient data.
-- **Market Hours**: Data is most accurate when markets are closed (after-hours or weekends).
-- **File Paths**: The ranking script uses hardcoded paths. Update them to match your system.
-
-## 📝 Example Workflow
-
-1. Run `magic_formula_nyse.py` to collect data (may take 30+ minutes for all stocks)
-2. Wait for completion and note the generated CSV filename
-3. Update the CSV path in `ranking_nyse.py`
-4. Run `ranking_nyse.py` to generate rankings
-5. Review `ranking_magic_formula_nyse.csv` for top-ranked stocks
-
-## 🔍 Filtering Logic
-
-The script automatically filters stocks to include only:
-- Common stocks
-- Ordinary shares
-- Class A, B, C shares
-
-And excludes:
-- Preferred stocks
-- ETFs
-- Units
-- Warrants
-- Rights
-- Bonds
-- Notes
-- Index funds
-- Trusts
+- **API rate limits**: Yahoo Finance may throttle requests; increase `--sleep` in `collect_data.py` if you hit errors.
+- **Data availability**: not all stocks have complete fundamentals; those are skipped automatically.
+- **Market hours**: data is most accurate when markets are closed.
+- **Run time**: collecting the full universe (~2,600 tickers) can take 30+ minutes.
 
 ## 📚 References
 
 - [The Little Book That Beats the Market](https://www.magicformulainvesting.com/) by Joel Greenblatt
-- Magic Formula methodology focuses on finding good companies at bargain prices
-
-## 🤝 Contributing
-
-Feel free to submit issues, fork the repository, and create pull requests for any improvements.
 
 ## 📄 License
 
 This project is provided as-is for educational and research purposes.
-
